@@ -7,6 +7,12 @@ uses
   Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls,
   U_DCS_OAuth2, IdBaseComponent, IdMessage;
 
+const
+  K_tokens_file     = 'tokens.txt';
+  K_token_expirancy = 'token_expirancy';
+  K_token_access    = 'token_access';
+  K_token_refresh   = 'token_refresh';
+
 type
   TFRM_sendMail = class(TForm)
     EDT_email_google: TEdit;
@@ -24,12 +30,17 @@ type
     procedure FormDestroy(Sender: TObject);
   private
     { Private declarations }
+    TSL_tokens: tStringList;
+
     privAppPath: string;
     DCSOAuth2Authenticator: TDCSOAuth2Authenticator;
 
-    procedure googleAPI_prepare(senderEmail: string; clearTokens: boolean = false);
+    procedure prepareAuthenticator(senderEmail: string; clearTokens: boolean = false);
     procedure emailSender_send_viaGmail;
     function  getEmailMessage_fromForm: tIdMessage;
+
+    procedure loadOptions;
+    procedure saveOptions;
   public
     { Public declarations }
   end;
@@ -42,23 +53,32 @@ implementation
 {$R *.dfm}
 
 uses
-  REST.Client, REST.Types, System.JSON, Web.HTTPApp, IdText;
+  REST.Client, REST.Types, System.JSON, Web.HTTPApp, IdText, dateUtils;
 
 
 { ***** / /  *****  / /  ******  / / ***** }
 procedure TFRM_sendMail.FormCreate(Sender: TObject);
+var
+  unix_exp:    Int64;
+  unix_onFile: string;
 begin
+  TSL_tokens             := tStringList.Create;
+  DCSOAuth2Authenticator := TDCSOAuth2Authenticator.Create(nil);
+
   privAppPath := Application.ExeName;
   privAppPath := ExtractFilePath(privAppPath);
 
-  DCSOAuth2Authenticator := TDCSOAuth2Authenticator.Create(nil);
+  self.loadOptions;
 end;
 
 
 { ***** / /  *****  / /  ******  / / ***** }
 procedure TFRM_sendMail.FormDestroy(Sender: TObject);
 begin
+  self.saveOptions;
+
   DCSOAuth2Authenticator.Free;
+  TSL_tokens.Free;
 end;
 
 
@@ -66,11 +86,65 @@ end;
 procedure TFRM_sendMail.BUT_sendClick(Sender: TObject);
 begin
   self.emailSender_send_viaGmail;
+
+  ShowMessage('The email was sent.');
 end;
 
 
 { ***** / /  *****  / /  ******  / / ***** }
-procedure TFRM_sendMail.googleAPI_prepare(senderEmail: string; clearTokens: boolean = false);
+procedure TFRM_sendMail.loadOptions;
+var
+  unix_exp:    Int64;
+  unix_onFile: string;
+begin
+  if FileExists(privAppPath + K_tokens_file) then
+     begin
+     // Open tokens file
+     TSL_tokens.LoadFromFile(privAppPath + K_tokens_file);
+
+     // Load previousely obtained tokens
+     unix_onFile := TSL_tokens.Values[K_token_expirancy];
+     if unix_onFile = ''
+        then unix_exp := DateTimeToUnix(now, false)
+        else unix_exp := StrToInt64(unix_onFile);
+
+     DCSOAuth2Authenticator.AccessToken       := TSL_tokens.Values[K_token_access];
+     DCSOAuth2Authenticator.RefreshToken      := TSL_tokens.Values[K_token_refresh];
+     DCSOAuth2Authenticator.AccessTokenExpiry := UnixToDateTime(unix_exp, false);
+
+     // Load other options
+     EDT_email_google.Text := TSL_tokens.Values[EDT_email_google.Name];
+     EDT_toEmail.Text      := TSL_tokens.Values[EDT_toEmail.Name];
+     EDT_toSubject.Text    := TSL_tokens.Values[EDT_toSubject.Name];
+     end;
+end;
+
+
+{ ***** / /  *****  / /  ******  / / ***** }
+procedure TFRM_sendMail.saveOptions;
+var
+  unix_exp:    Int64;
+  unix_expStr: string;
+begin
+  // Save corrent tokens
+  unix_exp    := DateTimeToUnix(DCSOAuth2Authenticator.AccessTokenExpiry, false);
+  unix_expStr := IntToStr(unix_exp);
+  TSL_tokens.Values[K_token_access]    := DCSOAuth2Authenticator.AccessToken;
+  TSL_tokens.Values[K_token_refresh]   := DCSOAuth2Authenticator.RefreshToken;
+  TSL_tokens.Values[K_token_expirancy] := unix_expStr;
+
+  // Save other options
+  TSL_tokens.Values[EDT_email_google.Name] := EDT_email_google.Text;
+  TSL_tokens.Values[EDT_toEmail.Name]      := EDT_toEmail.Text;
+  TSL_tokens.Values[EDT_toSubject.Name]    := EDT_toSubject.Text;
+
+  // Save to tokens file
+  TSL_tokens.SaveToFile(privAppPath + K_tokens_file);
+end;
+
+
+{ ***** / /  *****  / /  ******  / / ***** }
+procedure TFRM_sendMail.prepareAuthenticator(senderEmail: string; clearTokens: boolean = false);
 begin
   if clearTokens then
      DCSOAuth2Authenticator.ResetToDefaults;    // Reset tokens
@@ -83,8 +157,8 @@ begin
   DCSOAuth2Authenticator.RedirectionEndpoint   := DCSOAuth2Authenticator.getLocalRedirectionURL_andSetPort;
 
   // Application specific options (created on Google's console)
-  DCSOAuth2Authenticator.ClientID              := 'Enter your ClientID';      // ClientID created on console.developers.google.com
-  DCSOAuth2Authenticator.ClientSecret          := 'Enter your ClientSecret';  // ClientSecret for the application registered on console.developers.google.com
+  DCSOAuth2Authenticator.ClientID              := 'your ClientID goes here';      // ClientID created on console.developers.google.com
+  DCSOAuth2Authenticator.ClientSecret          := 'your ClientSecret goes here';  // ClientSecret for the application registered on console.developers.google.com
 
   // Email hint
   DCSOAuth2Authenticator.LoginHint := senderEmail;
@@ -96,24 +170,30 @@ procedure TFRM_sendMail.emailSender_send_viaGmail;
 var
   restClient:   TRestClient;
   restRequest:  TRESTRequest;
+  fromChanged:  boolean;
   endPoint:     string;
-  cliEmail:     string;
+  fromEmail:    string;
   MSG_email:    TIdMessage;
   msgStream:    tMemoryStream;
   errJSON_Obj:  TJSonObject;
   errJSONValue: TJSonValue;
   errorStr:     string;
 begin
-  MSG_email    := self.getEmailMessage_fromForm;
-  cliEmail     := MSG_email.From.Address;
-  endPoint     := format('https://gmail.googleapis.com/upload/gmail/v1/users/%s/messages/send', [cliEmail]);
-  msgStream    := tMemoryStream.Create;
+  MSG_email   := self.getEmailMessage_fromForm;
+  fromChanged := TSL_tokens.Values[EDT_email_google.Name] <> EDT_email_google.Text;
+  fromEmail   := MSG_email.From.Address;
+  msgStream   := tMemoryStream.Create;
+
+  // IMPORTANT: sender email in the URL
+  endPoint     := format('https://gmail.googleapis.com/upload/gmail/v1/users/%s/messages/send', [fromEmail]);
+
   restClient   := TRestClient.Create(endPoint);
   restRequest  := TRESTRequest.Create(restClient);
+
   errJSON_Obj  := TJSonObject.Create;
   errJSONValue := TJSonValue.Create;
 
-  self.googleAPI_prepare(cliEmail, false);
+  self.prepareAuthenticator(fromEmail, fromChanged);    // Clear tokens if From email changed
   restClient.Authenticator := DCSOAuth2Authenticator;
 
   try
@@ -136,6 +216,9 @@ begin
     // Send request
     restRequest.Execute;
 
+    if fromChanged then
+       self.saveOptions;
+
     // If Error response
     if restRequest.Response.GetSimpleValue('error', errorStr) then       // Check if an error was returned
        begin
@@ -147,6 +230,7 @@ begin
 
        raise Exception.Create('Google: ' + errorStr);
        end;
+
   finally
     restClient.DisposeOf;
     msgStream.Free;
@@ -172,7 +256,7 @@ begin
   myIndyMsg.clear;
   myIndyMsg.Encoding               := meMIME;
   myIndyMsg.BccList.EMailAddresses := EDT_toEmail.Text;
-  myIndyMsg.from.Name              := 'Delphi test Email';
+  myIndyMsg.from.Name              := 'Delphi Application';
   myIndyMsg.from.Address           := EDT_email_google.Text;
   myIndyMsg.CharSet                := 'UTF-8';
   myIndyMsg.Subject                := EDT_toSubject.Text;
@@ -208,10 +292,5 @@ begin
 
   result := myIndyMsg;
 end;
-
-
-
-
-
 
 end.

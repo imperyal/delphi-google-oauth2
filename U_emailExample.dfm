@@ -13,6 +13,7 @@ object FRM_sendMail: TFRM_sendMail
   Font.Name = 'Tahoma'
   Font.Style = []
   OldCreateOrder = False
+  Position = poScreenCenter
   OnCreate = FormCreate
   OnDestroy = FormDestroy
   DesignSize = (
@@ -68,7 +69,7 @@ object FRM_sendMail: TFRM_sendMail
     Height = 21
     Anchors = [akLeft, akTop, akRight]
     TabOrder = 0
-    Text = 'imperyal@gmail.com'
+    Text = '@gmail.com'
     ExplicitWidth = 217
   end
   object EDT_toEmail: TEdit
@@ -78,7 +79,6 @@ object FRM_sendMail: TFRM_sendMail
     Height = 21
     Anchors = [akLeft, akTop, akRight]
     TabOrder = 1
-    Text = 'tiago@dcs.pt'
     ExplicitWidth = 217
   end
   object EDT_toSubject: TEdit
