@@ -83,8 +83,8 @@ begin
   DCSOAuth2Authenticator.RedirectionEndpoint   := DCSOAuth2Authenticator.getLocalRedirectionURL_andSetPort;
 
   // Application specific options (created on Google's console)
-  DCSOAuth2Authenticator.ClientID              := 'Enter your ClientID';  // ClientID do DCS-Horários registado em console.developers.google.com - dcs.lda@gmail.com
-  DCSOAuth2Authenticator.ClientSecret          := 'Enter your ClientSecret';                                                  // ClientSecret do DCS-Horários registado em console.developers.google.com - dcs.lda@gmail.com
+  DCSOAuth2Authenticator.ClientID              := 'Enter your ClientID';      // ClientID created on console.developers.google.com
+  DCSOAuth2Authenticator.ClientSecret          := 'Enter your ClientSecret';  // ClientSecret for the application registered on console.developers.google.com
 
   // Email hint
   DCSOAuth2Authenticator.LoginHint := senderEmail;
@@ -120,26 +120,26 @@ begin
     if MSG_email.BccList.Count <= 0
        then MSG_email.SaveToStream(msgStream, false)
        else begin
-            MSG_email.SaveToFile  (privAppPath + 'tmp.eml');   // Limitação do Indy, quando há bcc SaveToStream perde esse campo. Por isso usa-se SaveToFile para esses casos
+            MSG_email.SaveToFile  (privAppPath + 'tmp.eml');   // Limitation of Indy, when bcc is set TIdMessage.SaveToStream loses that field. We use TIdMessage.SaveToFile and then stream.LoadFromFile to get arround that problem
             msgStream.LoadFromFile(privAppPath + 'tmp.eml');
             end;
 
-    // Adicionar os parâmetros necessários
+    // Add email headers
     restRequest.Method := TRESTRequestMethod.rmPOST;
     restRequest.Params.AddHeader('Content-Type',  htmlEncode('message/rfc822'));
     restRequest.Params.ParameterByName('Content-Type').Options  := [poDoNotEncode];
     restRequest.AddParameter('uploadType', 'media', pkQUERY);
 
-    restRequest.Body.Add(msgStream, ctMESSAGE_RFC822);        // Se email apenas com metadata usar: //restRequest.Body.Add(format('{"raw": "%s"}', [MEM_base64.Lines.Text]), ctMESSAGE_RFC822);
+    restRequest.Body.Add(msgStream, ctMESSAGE_RFC822);        // If email with metadata only, use: //restRequest.Body.Add(format('{"raw": "%s"}', [MEM_base64.Lines.Text]), ctMESSAGE_RFC822);
 
-    //*****************
-    // Efetuar o pedido
+    //*************
+    // Send request
     restRequest.Execute;
 
-    // Caso seja devolvido um erro
-    if restRequest.Response.GetSimpleValue('error', errorStr) then       // Usada apenas para ver se há erro, errorStr não fica carregada porque o erro é um objeto JSON
+    // If Error response
+    if restRequest.Response.GetSimpleValue('error', errorStr) then       // Check if an error was returned
        begin
-       errorStr     := 'Error sending Email (generic).';                 // Erro por defeito, caso nã
+       errorStr     := 'Error sending Email (generic).';                 // Default error
        errJSONValue := errJSON_Obj.ParseJSONValue(restRequest.Response.Content, false, true);
 
        if errJSONValue <> nil then errJSONValue := (errJSONValue as TJSONObject).Get('error').JSONValue;
