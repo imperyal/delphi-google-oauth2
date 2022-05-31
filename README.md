@@ -10,7 +10,7 @@ This unit is inspired on Delphi's OAuth2 code but:
 - You will need libeay32.dll and ssleay32.dll in the same folder of your applications's .exe file for the Authenticator to work (becouse PKCE uses SHA256). 
 - You will need Indy
 
-# Test authenticator using the demo applicatrion (Google_Email_Example)
+# Test authenticator using the demo application (Google_Email_Example)
 Open the project and fill in your Application's ClientID and ClientSecret on procedure googleAPI_prepare:
 
 ```pascal
