@@ -72,22 +72,21 @@ end;
 { ***** / /  *****  / /  ******  / / ***** }
 procedure TFRM_sendMail.googleAPI_prepare(senderEmail: string; clearTokens: boolean = false);
 begin
-  // Se generateTokens for true coloca os tokens em branco em vez de usar os tokens previamente carregados
   if clearTokens then
-     DCSOAuth2Authenticator.ResetToDefaults;
+     DCSOAuth2Authenticator.ResetToDefaults;    // Reset tokens
 
-  // Configurações gerais
+  // General options
   DCSOAuth2Authenticator.AccessTokenEndpoint   := 'https://www.googleapis.com/oauth2/v4/token';
   DCSOAuth2Authenticator.AuthorizationEndpoint := 'https://accounts.google.com/o/oauth2/v2/auth';
   DCSOAuth2Authenticator.ResponseType          := TDCSOAuth2ResponseType.rtCODE;
   DCSOAuth2Authenticator.Scope                 := 'https://www.googleapis.com/auth/gmail.send';
   DCSOAuth2Authenticator.RedirectionEndpoint   := DCSOAuth2Authenticator.getLocalRedirectionURL_andSetPort;
 
-  // Configuração dos códigos da aplicação registada no google (dcs.lda@gmail.com)
-  DCSOAuth2Authenticator.ClientID              := '158103715902-fk4898sbubg8hn237j4on3r044veeijj.apps.googleusercontent.com';  // ClientID do DCS-Horários registado em console.developers.google.com - dcs.lda@gmail.com
-  DCSOAuth2Authenticator.ClientSecret          := '9RZNXIz1KIYSASB8mgqg2oow';                                                  // ClientSecret do DCS-Horários registado em console.developers.google.com - dcs.lda@gmail.com
+  // Application specific options (created on Google's console)
+  DCSOAuth2Authenticator.ClientID              := 'Enter your ClientID';  // ClientID do DCS-Horários registado em console.developers.google.com - dcs.lda@gmail.com
+  DCSOAuth2Authenticator.ClientSecret          := 'Enter your ClientSecret';                                                  // ClientSecret do DCS-Horários registado em console.developers.google.com - dcs.lda@gmail.com
 
-  // Email google do utilizador
+  // Email hint
   DCSOAuth2Authenticator.LoginHint := senderEmail;
 end;
 
