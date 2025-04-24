@@ -58,9 +58,6 @@ uses
 
 { ***** / /  *****  / /  ******  / / ***** }
 procedure TFRM_sendMail.FormCreate(Sender: TObject);
-var
-  unix_exp:    Int64;
-  unix_onFile: string;
 begin
   TSL_tokens             := tStringList.Create;
   DCSOAuth2Authenticator := TDCSOAuth2Authenticator.Create(nil);
@@ -191,7 +188,7 @@ begin
   restRequest  := TRESTRequest.Create(restClient);
 
   errJSON_Obj  := TJSonObject.Create;
-  errJSONValue := TJSonValue.Create;
+  errJSONValue := nil;
 
   self.prepareAuthenticator(fromEmail, fromChanged);    // Clear tokens if From email changed
   restClient.Authenticator := DCSOAuth2Authenticator;
@@ -232,7 +229,7 @@ begin
        end;
 
   finally
-    restClient.DisposeOf;
+    restClient.Free;
     msgStream.Free;
     errJSON_Obj.Free;
     errJSONValue.Free;
