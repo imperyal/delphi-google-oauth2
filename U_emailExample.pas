@@ -188,7 +188,7 @@ begin
   restRequest  := TRESTRequest.Create(restClient);
 
   errJSON_Obj  := TJSonObject.Create;
-  errJSONValue := TJSonValue.Create;
+  errJSONValue := nil;
 
   self.prepareAuthenticator(fromEmail, fromChanged);    // Clear tokens if From email changed
   restClient.Authenticator := DCSOAuth2Authenticator;
