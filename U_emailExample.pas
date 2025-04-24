@@ -58,9 +58,6 @@ uses
 
 { ***** / /  *****  / /  ******  / / ***** }
 procedure TFRM_sendMail.FormCreate(Sender: TObject);
-var
-  unix_exp:    Int64;
-  unix_onFile: string;
 begin
   TSL_tokens             := tStringList.Create;
   DCSOAuth2Authenticator := TDCSOAuth2Authenticator.Create(nil);

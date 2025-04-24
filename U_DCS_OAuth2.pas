@@ -592,7 +592,6 @@ function TDCSOAuth2Authenticator.encode_SHA256_base64URL(str_toEncode: string): 
 var
   hash_sha256: TIdHashSHA256;
   enc_base64:  TBase64Encoding;
-  str_sha256:  string;
   arr_sha256:  TIdBytes;
   str_b64:     string;
   str_b64URL:  string;
