@@ -341,7 +341,7 @@ begin
        self.FAuthCode := '';
 
   finally
-    restClient.DisposeOf;
+    restClient.Free;
   end;
 end;
 

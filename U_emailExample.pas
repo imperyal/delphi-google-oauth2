@@ -232,7 +232,7 @@ begin
        end;
 
   finally
-    restClient.DisposeOf;
+    restClient.Free;
     msgStream.Free;
     errJSON_Obj.Free;
     errJSONValue.Free;
