@@ -2,12 +2,12 @@
 Browser enabled TCustomAuthenticator for Delphi TRestClient
 
 This unit is inspired on Delphi's OAuth2 code but:
-- Allows authorization via externel browser
+- Allows authorization via external browser
 - Uses PKCE flow for added security
-- Allows gereration of new tokens when they expire (using the refresh token)
+- Allows generation of new tokens when they expire (using the refresh token)
 
 # Dependencies
-- You will need libeay32.dll and ssleay32.dll in the same folder of your applications's .exe file for the Authenticator to work (becouse PKCE uses SHA256). 
+- You will need libeay32.dll and ssleay32.dll in the same folder of your application's .exe file for the Authenticator to work (because PKCE uses SHA256).
 - You will need Indy
 
 # Test authenticator using the demo application (Google_Email_Example)
