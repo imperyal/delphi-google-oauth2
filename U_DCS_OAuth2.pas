@@ -55,6 +55,7 @@ type
   EOAuth2Exception            = class(ERESTException);
   EOAuth2AuthenticationTimeout = class(EOAuth2Exception);
   EOAuth2AuthenticationFailed = class(EOAuth2Exception);
+  EOAuth2AuthenticationCancelled = class(EOAuth2Exception);
 
   TDCSShowBrowserEvent = procedure(Sender: TDCSOAuth2Authenticator; Url: string) of object;
 
@@ -69,6 +70,7 @@ type
     FAuthCode:              string;
     FAuthenticationTimeout: Cardinal;
     FAuthorizationEndpoint: string;
+    FCancelled:             Boolean;
     FClientID:              string;
     FClientSecret:          string;
     FLocalState:            string;
@@ -88,6 +90,7 @@ type
 
     FOnShowBrowser: TDCSShowBrowserEvent;
 
+    function  GetCancelled: Boolean;
     function  GetPrivTempAuthCode: string;
     procedure SetAccessTokenEndpoint(const AValue: string);
     procedure SetAccessTokenParamName(const AValue: string);
@@ -141,6 +144,7 @@ type
     function  AuthorizationRequestURI: string;
 
     procedure AquireAccessToken_browser;
+    procedure Cancel;
     procedure GetTokens_fromAuthCode;
     procedure GetTokens_fromRefreshToken;
     procedure GetTokens(requestType: TDCSTokenRequestType);
@@ -148,6 +152,7 @@ type
   public
     { Public properties }
     property AuthenticationTimeout: Cardinal read FAuthenticationTimeout write FAuthenticationTimeout default 300000;
+    property Cancelled: Boolean read GetCancelled;
 
   published
     { Published properties }
@@ -302,6 +307,18 @@ end;
 
 
 { ******* // ******* // ******* // ******* // ******* // ******* // ******* }
+function TDCSOAuth2Authenticator.GetCancelled: Boolean;
+begin
+  FSync.Acquire;
+  try
+    Result := FCancelled;
+  finally
+    FSync.Release;
+  end;
+end;
+
+
+{ ******* // ******* // ******* // ******* // ******* // ******* // ******* }
 function TDCSOAuth2Authenticator.GetPrivTempAuthCode: string;
 begin
   FSync.Acquire;
@@ -418,6 +435,7 @@ begin
   // - the http server waits for the user to authorize
   // - then google redirects the browser to the local RedirectionEndpoint provided adding the AuthCode on its queryParams
   privTempAuthCode := '';  // Clear
+  FCancelled := False;
   self.LS_start;
 
   //*******************************
@@ -435,6 +453,9 @@ begin
     repeat
       if (GetTickCount - authStartTick >= FAuthenticationTimeout) then
         raise EOAuth2AuthenticationTimeout.Create('Authentication timed out');
+
+      if Cancelled then
+        raise EOAuth2AuthenticationCancelled.Create('Authentication cancelled');
 
       Sleep(250);
     until (privTempAuthCode <> '');
@@ -456,6 +477,18 @@ begin
 
   if (self.FAccessToken = '') then
     raise EOAuth2Exception.Create('Failed to aquire access token');
+end;
+
+
+{ ******* // ******* // ******* // ******* // ******* // ******* // ******* }
+procedure TDCSOAuth2Authenticator.Cancel;
+begin
+  FSync.Acquire;
+  try
+    FCancelled := True;
+  finally
+    FSync.Release;
+  end;
 end;
 
 
