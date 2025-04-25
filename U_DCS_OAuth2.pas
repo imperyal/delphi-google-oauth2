@@ -62,6 +62,7 @@ type
     FAccessTokenExpiry:     TDateTime;
     FAccessTokenParamName:  string;
     FAuthCode:              string;
+    FAuthenticationTimeout: Cardinal;
     FAuthorizationEndpoint: string;
     FClientID:              string;
     FClientSecret:          string;
@@ -127,6 +128,11 @@ type
     procedure GetTokens_fromAuthCode;
     procedure GetTokens_fromRefreshToken;
     procedure GetTokens(requestType: TDCSTokenRequestType);
+
+  public
+    { Public properties }
+    property AuthenticationTimeout: Cardinal read FAuthenticationTimeout write FAuthenticationTimeout default 300000;
+
   published
     { Published properties }
     property AccessToken:           string     read FAccessToken           write SetAccessToken;
@@ -194,6 +200,7 @@ constructor TDCSOAuth2Authenticator.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
   self.ResetToDefaults;
+  FAuthenticationTimeout := 300000; // 5 minutes
 end;
 
 
@@ -239,6 +246,8 @@ begin
   self.AuthorizationEndpoint := ASource.AuthorizationEndpoint;
   self.AccessTokenEndpoint   := ASource.AccessTokenEndpoint;
   self.RedirectionEndpoint   := ASource.RedirectionEndpoint;
+
+  FAuthenticationTimeout     := ASource.FAuthenticationTimeout;
 end;
 
 
@@ -351,7 +360,7 @@ end;
 // Use the authCode to get the AccessToken and RefreshToken
 procedure TDCSOAuth2Authenticator.AquireAccessToken_browser;
 var
-  i:   integer;
+  authStartTick: Cardinal;
   url: string;
 begin
   if (self.FClientID     = '') then raise Exception.Create('ClientID required');
@@ -377,14 +386,11 @@ begin
   ShellExecute(0, 'open', PChar(url), nil, nil, SW_SHOWNORMAL);
 
   //****************************************
-  // User will have 60 seconds to authorize
-  for i := 0 to 60 do
-      begin
-      sleep(1000);
-
-      if privTempAuthCode <> '' then  // When this becomes set we have the auth code
-         break;
-      end;
+  // User will have N milliseconds to authorize. When 'privTempAuthCode' is set, we have the auth code
+  authStartTick := GetTickCount;
+  repeat
+    Sleep(250);
+  until (privTempAuthCode <> '') or (GetTickCount - authStartTick >= FAuthenticationTimeout);
 
   //******************
   // Stop Local Server
