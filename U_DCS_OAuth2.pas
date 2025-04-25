@@ -28,6 +28,7 @@ interface
 uses
   System.Classes,
   System.SysUtils,
+  System.SyncObjs,
   Data.Bind.ObjectScope,
   Data.Bind.Components,
   REST.Client,
@@ -73,13 +74,15 @@ type
     FRefreshToken:          string;
     FResponseType:          TDCSOAuth2ResponseType;
     FScope:                 string;
+    FSync:                  TCriticalSection;
     FTokenType:             TDCSOAuth2TokenType;
     FLoginHint:             string;
 
     privLS:           TIdHTTPServer;    // LS: Local server (Used to get the Auth code from the localhost redirect by the service provider)
     privLS_port:      integer;
-    privTempAuthCode: string;
+    FPrivTempAuthCode: string;
 
+    function  GetPrivTempAuthCode: string;
     procedure SetAccessTokenEndpoint(const AValue: string);
     procedure SetAccessTokenParamName(const AValue: string);
     procedure SetAuthCode(const AValue: string);
@@ -87,6 +90,7 @@ type
     procedure SetClientID(const AValue: string);
     procedure SetClientSecret(const AValue: string);
     procedure SetLocalState(const AValue: string);
+    procedure SetPrivTempAuthCode(const AValue: string);
     procedure SetRedirectionEndpoint(const AValue: string);
     procedure SetRefreshToken(const AValue: string);
     procedure SetResponseType(const AValue: TDCSOAuth2ResponseType);
@@ -109,6 +113,11 @@ type
 
     function  generate_randomString(strLength: integer): string;
     function  encode_SHA256_base64URL(str_toEncode: string): string;
+
+  private
+    { Private properties }
+    property privTempAuthCode: string read GetPrivTempAuthCode write SetPrivTempAuthCode;
+
   protected
     { Protected declarations }
     procedure DefineProperties(Filer: TFiler); override;
@@ -117,6 +126,7 @@ type
   public
     { Public declarations }
     constructor Create(AOwner: TComponent); override;
+    destructor Destroy; override;
 
     procedure Assign(ASource: TDCSOAuth2Authenticator); reintroduce;
     procedure ResetToDefaults; override;
@@ -201,6 +211,15 @@ begin
   inherited Create(AOwner);
   self.ResetToDefaults;
   FAuthenticationTimeout := 300000; // 5 minutes
+  FSync := TCriticalSection.Create;
+end;
+
+
+{ ******* // ******* // ******* // ******* // ******* // ******* // ******* }
+destructor TDCSOAuth2Authenticator.Destroy;
+begin
+  FSync.Free;
+  inherited;
 end;
 
 
@@ -271,6 +290,18 @@ begin
      result := result + '&code_challenge_method=' + URIEncode('S256');
      result := result + '&code_challenge='        + URIEncode(self.FCodeChallenge);
      end;
+end;
+
+
+{ ******* // ******* // ******* // ******* // ******* // ******* // ******* }
+function TDCSOAuth2Authenticator.GetPrivTempAuthCode: string;
+begin
+  FSync.Acquire;
+  try
+    Result := FPrivTempAuthCode;
+  finally
+    FSync.Release;
+  end;
 end;
 
 
@@ -806,6 +837,18 @@ begin
   begin
     FLocalState := AValue;
     PropertyValueChanged;
+  end;
+end;
+
+
+{ ******* // ******* // ******* // ******* // ******* // ******* // ******* }
+procedure TDCSOAuth2Authenticator.SetPrivTempAuthCode(const AValue: string);
+begin
+  FSync.Acquire;
+  try
+    FPrivTempAuthCode := AValue;
+  finally
+    FSync.Release;
   end;
 end;
 
