@@ -598,8 +598,13 @@ var
 begin
   result := '';
 
-  LoadOpenSSLLibrary;
-  if not TIdHashSHA256.IsAvailable then raise Exception.Create('Error encode_SHA256_base64URL: TIdHashSHA256 not available.');
+  // Load OpenSSL if not already loaded by the application
+  if not TIdHashSHA256.IsAvailable then
+    begin
+    LoadOpenSSLLibrary;
+    if not TIdHashSHA256.IsAvailable then
+      raise Exception.Create('Error encode_SHA256_base64URL: TIdHashSHA256 not available.');
+    end;
 
   hash_sha256 := TIdHashSHA256.Create;
   enc_base64 := TBase64Encoding.Create(0);
