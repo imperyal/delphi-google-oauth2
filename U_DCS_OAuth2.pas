@@ -54,6 +54,8 @@ type
   TDCSSubOAuth2AuthBindSource = class;
   EOAuth2Exception            = class(ERESTException);
 
+  TDCSShowBrowserEvent = procedure(Sender: TDCSOAuth2Authenticator; Url: string) of object;
+
   TDCSOAuth2Authenticator = class(TCustomAuthenticator)
   private
     { Private declarations }
@@ -81,6 +83,8 @@ type
     privLS:           TIdHTTPServer;    // LS: Local server (Used to get the Auth code from the localhost redirect by the service provider)
     privLS_port:      integer;
     FPrivTempAuthCode: string;
+
+    FOnShowBrowser: TDCSShowBrowserEvent;
 
     function  GetPrivTempAuthCode: string;
     procedure SetAccessTokenEndpoint(const AValue: string);
@@ -163,6 +167,8 @@ type
     property TokenType:    TDCSOAuth2TokenType       read FTokenType       write SetTokenType stored TokenTypeIsStored;
     property LoginHint:    string                    read FLoginHint       write FLoginHint;
     property BindSource: TDCSSubOAuth2AuthBindSource read FBindSource;
+
+    property OnShowBrowser: TDCSShowBrowserEvent read FOnShowBrowser write FOnShowBrowser;
   end;
 
   // ***************************************************************************************
@@ -413,19 +419,25 @@ begin
   self.LS_start;
 
   //*******************************
-  // Open link to get authorization
-  ShellExecute(0, 'open', PChar(url), nil, nil, SW_SHOWNORMAL);
+  // Get authorization
+  // - if 'FOnShowBrowser' is set, let the application handle opening the browser. Otherwise, open the link directly.
+  try
+    if Assigned(FOnShowBrowser) then
+      FOnShowBrowser(self, url)
+    else
+      ShellExecute(0, 'open', PChar(url), nil, nil, SW_SHOWNORMAL);
 
-  //****************************************
-  // User will have N milliseconds to authorize. When 'privTempAuthCode' is set, we have the auth code
-  authStartTick := GetTickCount;
-  repeat
-    Sleep(250);
-  until (privTempAuthCode <> '') or (GetTickCount - authStartTick >= FAuthenticationTimeout);
-
-  //******************
-  // Stop Local Server
-  self.LS_stop;
+    //****************************************
+    // User will have N milliseconds to authorize. When 'privTempAuthCode' is set, we have the auth code
+    authStartTick := GetTickCount;
+    repeat
+      Sleep(250);
+    until (privTempAuthCode <> '') or (GetTickCount - authStartTick >= FAuthenticationTimeout);
+  finally
+    //******************
+    // Stop Local Server
+    self.LS_stop;
+  end;
 
   if privTempAuthCode <> K_invalidAuth then
      self.FAuthCode := privTempAuthCode;
