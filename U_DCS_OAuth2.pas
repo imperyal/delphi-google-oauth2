@@ -53,6 +53,8 @@ type
   TDCSOAuth2Authenticator     = class;
   TDCSSubOAuth2AuthBindSource = class;
   EOAuth2Exception            = class(ERESTException);
+  EOAuth2AuthenticationTimeout = class(EOAuth2Exception);
+  EOAuth2AuthenticationFailed = class(EOAuth2Exception);
 
   TDCSShowBrowserEvent = procedure(Sender: TDCSOAuth2Authenticator; Url: string) of object;
 
@@ -431,8 +433,11 @@ begin
     // User will have N milliseconds to authorize. When 'privTempAuthCode' is set, we have the auth code
     authStartTick := GetTickCount;
     repeat
+      if (GetTickCount - authStartTick >= FAuthenticationTimeout) then
+        raise EOAuth2AuthenticationTimeout.Create('Authentication timed out');
+
       Sleep(250);
-    until (privTempAuthCode <> '') or (GetTickCount - authStartTick >= FAuthenticationTimeout);
+    until (privTempAuthCode <> '');
   finally
     //******************
     // Stop Local Server
@@ -443,7 +448,7 @@ begin
      self.FAuthCode := privTempAuthCode;
 
   if (self.FAuthCode = '')
-     then raise EOAuth2Exception.Create('Authentication failed');
+     then raise EOAuth2AuthenticationFailed.Create('Authentication failed');
 
   //******************************
   // Get Tokens using the AuthCode
