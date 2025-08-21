@@ -28,6 +28,7 @@ interface
 uses
   System.Classes,
   System.SysUtils,
+  System.SyncObjs,
   Data.Bind.ObjectScope,
   Data.Bind.Components,
   REST.Client,
@@ -52,6 +53,11 @@ type
   TDCSOAuth2Authenticator     = class;
   TDCSSubOAuth2AuthBindSource = class;
   EOAuth2Exception            = class(ERESTException);
+  EOAuth2AuthenticationTimeout = class(EOAuth2Exception);
+  EOAuth2AuthenticationFailed = class(EOAuth2Exception);
+  EOAuth2AuthenticationCancelled = class(EOAuth2Exception);
+
+  TDCSShowBrowserEvent = procedure(Sender: TDCSOAuth2Authenticator; Url: string) of object;
 
   TDCSOAuth2Authenticator = class(TCustomAuthenticator)
   private
@@ -62,7 +68,9 @@ type
     FAccessTokenExpiry:     TDateTime;
     FAccessTokenParamName:  string;
     FAuthCode:              string;
+    FAuthenticationTimeout: Cardinal;
     FAuthorizationEndpoint: string;
+    FCancelled:             Boolean;
     FClientID:              string;
     FClientSecret:          string;
     FLocalState:            string;
@@ -72,13 +80,18 @@ type
     FRefreshToken:          string;
     FResponseType:          TDCSOAuth2ResponseType;
     FScope:                 string;
+    FSync:                  TCriticalSection;
     FTokenType:             TDCSOAuth2TokenType;
     FLoginHint:             string;
 
     privLS:           TIdHTTPServer;    // LS: Local server (Used to get the Auth code from the localhost redirect by the service provider)
     privLS_port:      integer;
-    privTempAuthCode: string;
+    FPrivTempAuthCode: string;
 
+    FOnShowBrowser: TDCSShowBrowserEvent;
+
+    function  GetCancelled: Boolean;
+    function  GetPrivTempAuthCode: string;
     procedure SetAccessTokenEndpoint(const AValue: string);
     procedure SetAccessTokenParamName(const AValue: string);
     procedure SetAuthCode(const AValue: string);
@@ -86,6 +99,7 @@ type
     procedure SetClientID(const AValue: string);
     procedure SetClientSecret(const AValue: string);
     procedure SetLocalState(const AValue: string);
+    procedure SetPrivTempAuthCode(const AValue: string);
     procedure SetRedirectionEndpoint(const AValue: string);
     procedure SetRefreshToken(const AValue: string);
     procedure SetResponseType(const AValue: TDCSOAuth2ResponseType);
@@ -108,6 +122,11 @@ type
 
     function  generate_randomString(strLength: integer): string;
     function  encode_SHA256_base64URL(str_toEncode: string): string;
+
+  private
+    { Private properties }
+    property privTempAuthCode: string read GetPrivTempAuthCode write SetPrivTempAuthCode;
+
   protected
     { Protected declarations }
     procedure DefineProperties(Filer: TFiler); override;
@@ -116,6 +135,7 @@ type
   public
     { Public declarations }
     constructor Create(AOwner: TComponent); override;
+    destructor Destroy; override;
 
     procedure Assign(ASource: TDCSOAuth2Authenticator); reintroduce;
     procedure ResetToDefaults; override;
@@ -124,9 +144,16 @@ type
     function  AuthorizationRequestURI: string;
 
     procedure AquireAccessToken_browser;
+    procedure Cancel;
     procedure GetTokens_fromAuthCode;
     procedure GetTokens_fromRefreshToken;
     procedure GetTokens(requestType: TDCSTokenRequestType);
+
+  public
+    { Public properties }
+    property AuthenticationTimeout: Cardinal read FAuthenticationTimeout write FAuthenticationTimeout default 300000;
+    property Cancelled: Boolean read GetCancelled;
+
   published
     { Published properties }
     property AccessToken:           string     read FAccessToken           write SetAccessToken;
@@ -147,6 +174,8 @@ type
     property TokenType:    TDCSOAuth2TokenType       read FTokenType       write SetTokenType stored TokenTypeIsStored;
     property LoginHint:    string                    read FLoginHint       write FLoginHint;
     property BindSource: TDCSSubOAuth2AuthBindSource read FBindSource;
+
+    property OnShowBrowser: TDCSShowBrowserEvent read FOnShowBrowser write FOnShowBrowser;
   end;
 
   // ***************************************************************************************
@@ -194,6 +223,16 @@ constructor TDCSOAuth2Authenticator.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
   self.ResetToDefaults;
+  FAuthenticationTimeout := 300000; // 5 minutes
+  FSync := TCriticalSection.Create;
+end;
+
+
+{ ******* // ******* // ******* // ******* // ******* // ******* // ******* }
+destructor TDCSOAuth2Authenticator.Destroy;
+begin
+  FSync.Free;
+  inherited;
 end;
 
 
@@ -239,6 +278,8 @@ begin
   self.AuthorizationEndpoint := ASource.AuthorizationEndpoint;
   self.AccessTokenEndpoint   := ASource.AccessTokenEndpoint;
   self.RedirectionEndpoint   := ASource.RedirectionEndpoint;
+
+  FAuthenticationTimeout     := ASource.FAuthenticationTimeout;
 end;
 
 
@@ -262,6 +303,30 @@ begin
      result := result + '&code_challenge_method=' + URIEncode('S256');
      result := result + '&code_challenge='        + URIEncode(self.FCodeChallenge);
      end;
+end;
+
+
+{ ******* // ******* // ******* // ******* // ******* // ******* // ******* }
+function TDCSOAuth2Authenticator.GetCancelled: Boolean;
+begin
+  FSync.Acquire;
+  try
+    Result := FCancelled;
+  finally
+    FSync.Release;
+  end;
+end;
+
+
+{ ******* // ******* // ******* // ******* // ******* // ******* // ******* }
+function TDCSOAuth2Authenticator.GetPrivTempAuthCode: string;
+begin
+  FSync.Acquire;
+  try
+    Result := FPrivTempAuthCode;
+  finally
+    FSync.Release;
+  end;
 end;
 
 
@@ -351,7 +416,7 @@ end;
 // Use the authCode to get the AccessToken and RefreshToken
 procedure TDCSOAuth2Authenticator.AquireAccessToken_browser;
 var
-  i:   integer;
+  authStartTick: Cardinal;
   url: string;
 begin
   if (self.FClientID     = '') then raise Exception.Create('ClientID required');
@@ -370,31 +435,41 @@ begin
   // - the http server waits for the user to authorize
   // - then google redirects the browser to the local RedirectionEndpoint provided adding the AuthCode on its queryParams
   privTempAuthCode := '';  // Clear
+  FCancelled := False;
   self.LS_start;
 
   //*******************************
-  // Open link to get authorization
-  ShellExecute(0, 'open', PChar(url), nil, nil, SW_SHOWNORMAL);
+  // Get authorization
+  // - if 'FOnShowBrowser' is set, let the application handle opening the browser. Otherwise, open the link directly.
+  try
+    if Assigned(FOnShowBrowser) then
+      FOnShowBrowser(self, url)
+    else
+      ShellExecute(0, 'open', PChar(url), nil, nil, SW_SHOWNORMAL);
 
-  //****************************************
-  // User will have 60 seconds to authorize
-  for i := 0 to 60 do
-      begin
-      sleep(1000);
+    //****************************************
+    // User will have N milliseconds to authorize. When 'privTempAuthCode' is set, we have the auth code
+    authStartTick := GetTickCount;
+    repeat
+      if (GetTickCount - authStartTick >= FAuthenticationTimeout) then
+        raise EOAuth2AuthenticationTimeout.Create('Authentication timed out');
 
-      if privTempAuthCode <> '' then  // When this becomes set we have the auth code
-         break;
-      end;
+      if Cancelled then
+        raise EOAuth2AuthenticationCancelled.Create('Authentication cancelled');
 
-  //******************
-  // Stop Local Server
-  self.LS_stop;
+      Sleep(250);
+    until (privTempAuthCode <> '');
+  finally
+    //******************
+    // Stop Local Server
+    self.LS_stop;
+  end;
 
   if privTempAuthCode <> K_invalidAuth then
      self.FAuthCode := privTempAuthCode;
 
   if (self.FAuthCode = '')
-     then raise EOAuth2Exception.Create('Authentication failed');
+     then raise EOAuth2AuthenticationFailed.Create('Authentication failed');
 
   //******************************
   // Get Tokens using the AuthCode
@@ -402,6 +477,18 @@ begin
 
   if (self.FAccessToken = '') then
     raise EOAuth2Exception.Create('Failed to aquire access token');
+end;
+
+
+{ ******* // ******* // ******* // ******* // ******* // ******* // ******* }
+procedure TDCSOAuth2Authenticator.Cancel;
+begin
+  FSync.Acquire;
+  try
+    FCancelled := True;
+  finally
+    FSync.Release;
+  end;
 end;
 
 
@@ -805,6 +892,18 @@ begin
   begin
     FLocalState := AValue;
     PropertyValueChanged;
+  end;
+end;
+
+
+{ ******* // ******* // ******* // ******* // ******* // ******* // ******* }
+procedure TDCSOAuth2Authenticator.SetPrivTempAuthCode(const AValue: string);
+begin
+  FSync.Acquire;
+  try
+    FPrivTempAuthCode := AValue;
+  finally
+    FSync.Release;
   end;
 end;
 
